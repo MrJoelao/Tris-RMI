@@ -4,12 +4,12 @@ package TrisPackage;
  *
  * @author joels,ricpi,NicMuso,AlePini
  */
-public class TrisNormal {
+public class TrisLogic {
     private char[][] board;
     private char current_player;
 
     // Costruttore che accetta un parametro per il giocatore iniziale
-    public TrisNormal(char initialPlayer) {
+    public TrisLogic(char initialPlayer) {
         board = new char[3][3];
         current_player = initialPlayer; // Imposta il giocatore iniziale
         inizializza();
