@@ -8,6 +8,9 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URL;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
+import java.rmi.RemoteException;
 import java.util.List;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
@@ -168,20 +171,22 @@ public class TrisGui extends javax.swing.JFrame {
     private TrisAI trisAI;
     private LoginManager loginManager;
     private ScoreManager scoreManager;
+    private TrisServerInterface server;
     /**
      * Creates new form TrisGui
      */
     public TrisGui() {
         initComponents();
         
-        //istanzio login manager con le impostazioni predefinite
-        loginManager = new LoginManager(FILENAME_LM, DEFAULT_USERNAME, DEFAULT_PASSWORD, DEFAULT_TYPE);
-        scoreManager = new ScoreManager(FILENAME_SM);
+        try {
+            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+            server = (TrisServerInterface) registry.lookup("TrisServer");
+        } catch (Exception e) {
+            System.err.println("Client exception: " + e.toString());
+            e.printStackTrace();
+        }
         
-        //metto il pannello principale di welcome
         selectPanel(WELCOME_PAGE,0);
-        
-        //imposto il tema
         changeTheme(themeLoad(FILENAME_THEME));
     }
 
@@ -1296,111 +1301,69 @@ public class TrisGui extends javax.swing.JFrame {
         return themeNumber;
     }
     
-    public boolean move(int row,int col, JButton button){
-        int result;
-        
-        if(flagAI){
-           
-            if(!trisAI.playerMove(row, col)){
-                errorPopUp.setVisible(true); //messaggio d'errore se percaso la mossa non risulta valida
-            } else {
-                button.setIcon(new javax.swing.ImageIcon(getClass().getResource("/Icons/icon" + flagTeam + ".png")));
-            }
-            
-            trisAI.printBoard();
-            
-            if(winPopUp(trisAI.checkWinner(), usernameRed, usernameBlue)){//Per verificare la vincita
-                resetButtos();
-                trisAI.initializeBoard();
-                return true;
-            } 
-            
-            int[] computerMove = trisAI.computerMove();
-            setIconAtPosition(computerMove[0], computerMove[1]); 
-            
-            trisAI.printBoard();
-            
-            if(winPopUp(trisAI.checkWinner(), usernameRed, usernameBlue)){ //Per verificare la vincita
-                resetButtos();
-                trisAI.initializeBoard();
-                return true;
-            } 
-            
-        } else {
-            result = trisPvP.move(row, col);
-            String type;
-
-
-            if (result >= 0) {
-                if(result > 0){
-                    type = "O";
+    public boolean move(int row, int col, JButton button) {
+        try {
+            if(flagAI) {
+                int result = server.move(row, col, flagTeam);
+                if(result < 0) {
+                    errorPopUp.setVisible(true);
                 } else {
-                    type = "X";
+                    button.setIcon(new javax.swing.ImageIcon(getClass().getResource("/Icons/icon" + flagTeam + ".png")));
                 }
                 
-                 button.setIcon(new javax.swing.ImageIcon(getClass().getResource("/Icons/icon" + type + ".png")));
+                if(winPopUp(server.checkWinner(), usernameRed, usernameBlue)) {
+                    resetButtos();
+                    server.initializeGame(true, flagTeam, difficulty);
+                    return true;
+                }
                 
+                int[] computerMove = server.getAIMove();
+                setIconAtPosition(computerMove[0], computerMove[1]);
+                
+                if(winPopUp(server.checkWinner(), usernameRed, usernameBlue)) {
+                    resetButtos();
+                    server.initializeGame(true, flagTeam, difficulty);
+                    return true;
+                }
             } else {
-                errorPopUp.setVisible(true);
+                int result = server.move(row, col, flagTeam);
+                
+                if (result >= 0) {
+                    String type = (result > 0) ? "O" : "X";
+                    button.setIcon(new javax.swing.ImageIcon(getClass().getResource("/Icons/icon" + type + ".png")));
+                } else {
+                    errorPopUp.setVisible(true);
+                }
+                
+                if(winPopUp(server.checkWinner(), usernameRed, usernameBlue)) {
+                    resetButtos();
+                    server.initializeGame(false, flagTeam, 0);
+                    return true;
+                }
             }
-            if(winPopUp(trisPvP.checkWinner(), usernameRed, usernameBlue)){ 
-                resetButtos();
-                trisPvP.inizializza();
-                return true;
-            }
+        } catch (RemoteException e) {
+            e.printStackTrace();
         }
         return false;
     }
     
     public boolean winPopUp(int result, String redName, String blueName) {
-        boolean flag = true;
-        String winnerName = "";
-        String loserName = "";
-        
-        switch(result) {
-            case 1:
+        try {
+            boolean flag = server.winPopUp(result, redName, blueName);
+            
+            if (result == 1) {
                 redWinPopUp.setVisible(true);
-                winnerName = redName;
-                loserName = blueName;
-                if(flagAI){
-                    redPoint++;
-                    redPointTextField.setText(""+redPoint);
-                }
-                break;
-            case -1:
+            } else if (result == -1) {
                 blueWinPopUp.setVisible(true);
-                winnerName = blueName;
-                loserName = redName;
-                if(flagAI){
-                    bluePoint++;
-                    bluePointTextField.setText(""+bluePoint);
-                }
-                break;
-            case 0:
+            } else if (result == 0) {
                 tiePopUp.setVisible(true);
-                break;
-            default:
-                flag = false;
-                break;
-        }
-        // Aggiornamento del punteggio dei giocatori
-        if (!winnerName.isEmpty()) {
-            scoreManager.addVictory(winnerName); // Aggiorna il punteggio del vincitore
-            if (winnerName.equals(redName)) {
-                redPointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(redName))); // Aggiorna il punteggio del giocatore rosso
-            } else {
-                bluePointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(blueName))); // Aggiorna il punteggio del giocatore blu
             }
+            
+            return flag;
+        } catch (RemoteException e) {
+            e.printStackTrace();
+            return false;
         }
-        if (!loserName.isEmpty()) {
-            scoreManager.addDefeat(loserName); // Aggiorna il punteggio del perdente
-            if (loserName.equals(redName)) {
-                redPointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(redName))); // Aggiorna il punteggio del giocatore rosso
-            } else {
-                bluePointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(blueName))); // Aggiorna il punteggio del giocatore blu
-            }
-        }
-        return flag;
     }
 
 
@@ -1612,24 +1575,27 @@ public class TrisGui extends javax.swing.JFrame {
                         chooseTeamPage.setVisible(true);
                         break;
                     case GAME_PAGE:
-                        if(flagAI){
-                            trisAI = new TrisAI(flagTeam, difficulty);
-                        }else{
-                            trisPvP = new TrisNormal(flagTeam);                            
-                        }
-                        
-                        
-                        resetButtos();
-                        
-                        // Aggiornamento del punteggio dei giocatori
-                        redPointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(usernameRed))); // Aggiorna il punteggio del giocatore rosso
-                        bluePointTextField.setText(String.valueOf(scoreManager.getPlayerVictories(usernameBlue))); // Aggiorna il punteggio del giocatore blu
+                        try {
+                            if(flagAI) {
+                                server.initializeGame(true, flagTeam, difficulty);
+                            } else {
+                                server.initializeGame(false, flagTeam, 0);
+                            }
                             
-                        errorPopUp.setVisible(false);
-                        redWinPopUp.setVisible(false);
-                        blueWinPopUp.setVisible(false);
-                        gamePage.setVisible(true);
-                        break; 
+                            resetButtos();
+                            
+                            // Usa il server per ottenere i punteggi
+                            redPointTextField.setText(String.valueOf(server.getPlayerVictories(usernameRed)));
+                            bluePointTextField.setText(String.valueOf(server.getPlayerVictories(usernameBlue)));
+                                
+                            errorPopUp.setVisible(false);
+                            redWinPopUp.setVisible(false);
+                            blueWinPopUp.setVisible(false);
+                            gamePage.setVisible(true);
+                        } catch (RemoteException e) {
+                            e.printStackTrace();
+                        }
+                        break;
                     case SETTINGS_PAGE:
                         settingsPage.setVisible(true);
                         break;
@@ -1664,31 +1630,18 @@ public class TrisGui extends javax.swing.JFrame {
     
     // Metodo per aggiornare la tabella delle credenziali utilizzando le vittorie dei giocatori
     public void refreshCredentialsTable(JTable table) {
-        
-        List<String[]> playerStats = scoreManager.getAllPlayerStats(); // Ottiene la lista dei nomi dei giocatori con vittorie e sconfitte
-        DefaultTableModel model = (DefaultTableModel) table.getModel(); // Ottiene il modello della tabella
-
-        // Rimuove tutte le righe esistenti dalla tabella
-        while (model.getRowCount() > 0) {
-            model.removeRow(0);
-        }
-
-        ScoreManager scoreManager = new ScoreManager(FILENAME_SM); // Crea un'istanza di ScoreManager
-        // Ottiene la lista dei nomi dei giocatori
-        List<String> playerNames = scoreManager.getAllPlayerNames();
-
-        // Verifica se la lista dei giocatori è vuota
-        if (playerNames.isEmpty()) {
-            System.out.println("[TG] Lista dei giocatori vuota. Nessuna riga aggiunta alla tabella.");
-            return; // Esci dal metodo se la lista dei giocatori è vuota
-        }
-
-        // Itera attraverso la lista dei giocatori e aggiunge il nome, le vittorie e le sconfitte di ciascun giocatore alla tabella
-        for (String[] playerStat : playerStats) {
-            String playerName = playerStat[0];
-            int victories = Integer.parseInt(playerStat[1]); // Ottiene il numero di vittorie del giocatore
-            int defeats = Integer.parseInt(playerStat[2]); // Ottiene il numero di sconfitte del giocatore
-            model.addRow(new Object[]{playerName, victories, defeats}); // Aggiunge il nome, le vittorie e le sconfitte alla tabella
+        try {
+            // Usa il server invece di scoreManager
+            List<String[]> playerStats = server.getAllPlayerStats();
+            
+            DefaultTableModel model = (DefaultTableModel) table.getModel();
+            model.setRowCount(0); // Pulisce la tabella
+            
+            for (String[] stats : playerStats) {
+                model.addRow(stats);
+            }
+        } catch (RemoteException e) {
+            e.printStackTrace();
         }
     }
 
@@ -1767,81 +1720,58 @@ public class TrisGui extends javax.swing.JFrame {
         // TODO add your handling code here:
         redWinPopUp.setVisible(false);
     }//GEN-LAST:event_cancelButton2ActionPerformed
-    private void continueButton2ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_continueButton2ActionPerformed
-        // Ottieni l'username e la password inseriti dall'utente
-        String enteredUsername = usernameTextField.getText();
-        String enteredPassword = passwordField.getText();
+    private void continueButton2ActionPerformed(java.awt.event.ActionEvent evt) {
+        try {
+            String enteredUsername = usernameTextField.getText();
+            String enteredPassword = passwordField.getText();
 
-        // Verifica se le credenziali sono valide utilizzando il gestore del login
-        boolean credentialsValid = loginManager.checkCredentials(enteredUsername, enteredPassword);
-
-        // Se le credenziali sono valide
-        if (credentialsValid) {
-            if(usernameTextField.getText().equals(username0)){
-                messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, ERROR_SAME_CREDENTIALS);
-            } else{
-                // Visualizza una notifica di credenziali corrette
-                messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, false, MESSAGE_RIGHT_CREDENTIALS);
-
-                if(!flagLogin0){
-                    // Memorizza l'username dell'utente corrente
-                    username0 = enteredUsername; 
-                    flagLogin0 = true;
-
-                    // Passo alla scheda successiva
-                    selectPanel(MODE_PAGE,TIMER_MESSAGE);
+            if (server.checkCredentials(enteredUsername, enteredPassword)) {
+                if(enteredUsername.equals(username0)) {
+                    messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, ERROR_SAME_CREDENTIALS);
                 } else {
-                    // Memorizza l'username dell'utente corrente
-                    username1 = enteredUsername; 
+                    messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, false, MESSAGE_RIGHT_CREDENTIALS);
 
-                    if(flagTeam == 'X'){
-                        usernameBlue = username1;
-                        System.out.println("[TG] Team scelto: O per: " + username1);
+                    if(!flagLogin0) {
+                        username0 = enteredUsername;
+                        flagLogin0 = true;
+                        selectPanel(MODE_PAGE, TIMER_MESSAGE);
                     } else {
-                        System.out.println("[TG] Team scelto: X per: " + username1);
-                        usernameRed = username1;
+                        username1 = enteredUsername;
+                        server.setUsernames(username0, username1, flagTeam);
+                        selectPanel(GAME_PAGE, TIMER_MESSAGE);
                     }
-
-                    // Passo alla scheda successiva
-                    selectPanel(GAME_PAGE,TIMER_MESSAGE);
                 }
+            } else {
+                messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, ERROR_WRONG_CREDENTIALS);
             }
-        } else {
-            // Se le credenziali non sono valide, visualizza un messaggio di errore
-            messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, ERROR_WRONG_CREDENTIALS);
+        } catch (RemoteException e) {
+            e.printStackTrace();
         }
-    }//GEN-LAST:event_continueButton2ActionPerformed
+    }
 
     private void passwordFieldActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_passwordFieldActionPerformed
         // TODO add your handling code here:
     }//GEN-LAST:event_passwordFieldActionPerformed
 
-    private void addButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_addButtonActionPerformed
-        // Ottieni l'username e la password inseriti dall'utente
-        String enteredUsername = usernameTextField.getText();
-        String enteredPassword = passwordField.getText();
+    private void addButtonActionPerformed(java.awt.event.ActionEvent evt) {
+        try {
+            String enteredUsername = usernameTextField.getText();
+            String enteredPassword = passwordField.getText();
 
-        // Verifica la sicurezza della password
-        int passwordSecure = loginManager.isPasswordSecure(enteredPassword);
-        // Ottiene il messaggio di errore relativo alla sicurezza della password
-        String errorMessage = displayPasswordErrorMessage(passwordSecure);
-
-        // Verifica se la password non è sicura o se l'username esiste già nel sistema
-        if (passwordSecure != PASSWORD_SECURE || loginManager.isUsernameExists(enteredUsername)) {
+            // Usa il server invece di loginManager direttamente
+            int passwordSecure = server.isPasswordSecure(enteredPassword);
             
-            // Visualizza il messaggio di errore relativo alla password
-            displayPasswordErrorMessage(passwordSecure);
-            // Visualizza una finestra pop-up con il messaggio di errore
-            messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, errorMessage);
-            
-        } else {
-            // Aggiunge le credenziali all'utente nel sistema
-            loginManager.addCredentials(enteredUsername, enteredPassword, false);
-            // Visualizza un messaggio di conferma
-            messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, false, MESSAGE_PASSWORD_SECURE);
-            
-        }    
-    }//GEN-LAST:event_addButtonActionPerformed
+            if (passwordSecure != PASSWORD_SECURE || server.isUsernameExists(enteredUsername)) {
+                String errorMessage = displayPasswordErrorMessage(passwordSecure);
+                messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, true, errorMessage);
+            } else {
+                server.addCredentials(enteredUsername, enteredPassword, false);
+                messagePopUp(popUpPanel, popUpTitle, popUpMessage, popUpBackground, false, MESSAGE_PASSWORD_SECURE);
+            }
+        } catch (RemoteException e) {
+            e.printStackTrace();
+        }
+    }
 
     private void backButtonActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_backButtonActionPerformed
         // TODO add your handling code here:
