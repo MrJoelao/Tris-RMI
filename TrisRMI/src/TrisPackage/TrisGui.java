@@ -178,13 +178,7 @@ public class TrisGui extends javax.swing.JFrame {
     public TrisGui() {
         initComponents();
         
-        try {
-            Registry registry = LocateRegistry.getRegistry("localhost", 1099);
-            server = (TrisServerInterface) registry.lookup("TrisServer");
-        } catch (Exception e) {
-            System.err.println("Client exception: " + e.toString());
-            e.printStackTrace();
-        }
+        server = ServerConnectionDialog.waitForServer(this);
         
         selectPanel(WELCOME_PAGE,0);
         changeTheme(themeLoad(FILENAME_THEME));
